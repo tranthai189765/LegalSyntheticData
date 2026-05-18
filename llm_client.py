@@ -1,32 +1,34 @@
 """
-Async LLM client wrapping the OpenAI-compatible FPT Cloud API.
+Async LLM client wrapping the OpenAI-compatible API.
 
-All agents share a single client instance (singleton pattern).
-Rate limiting is handled via asyncio.Semaphore (LLM_CONCURRENCY).
-Retries use tenacity with exponential backoff.
+Supports both:
+  • FPT Cloud  (gpt-oss-120b  – reasoning model, CoT in reasoning_content)
+  • OpenAI API (gpt-4o / gpt-4o-mini – standard model, supports json_object)
+
+Active provider is chosen automatically from config (OPENAI_API_KEY takes
+priority; set ACTIVE_PROVIDER=fpt to force FPT).
 """
 
-import asyncio
 import json
 import re
 from typing import Any
 
 from loguru import logger
 from openai import AsyncOpenAI
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from config import (
+    ACTIVE_API_KEY, ACTIVE_BASE_URL, ACTIVE_MODEL,
+    IS_REASONING_MODEL, LLM_CONCURRENCY, LLM_TEMPERATURE,
 )
 
-from config import FPT_API_KEY, FPT_BASE_URL, FPT_MODEL, LLM_CONCURRENCY, LLM_TEMPERATURE
+import asyncio
 
 
 def _extract_json(raw: str) -> dict:
     """
-    Try several strategies to extract a JSON object from LLM output.
-    The model sometimes wraps the JSON in thinking text or markdown.
+    Multi-strategy JSON extraction.
+    Needed for reasoning models that may prepend thinking text before the JSON.
     """
     raw = raw.strip()
 
@@ -36,7 +38,7 @@ def _extract_json(raw: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # 2. Strip markdown code fences
+    # 2. Strip markdown fences
     stripped = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
     stripped = re.sub(r"\s*```$", "", stripped, flags=re.MULTILINE).strip()
     try:
@@ -58,10 +60,15 @@ def _extract_json(raw: str) -> dict:
 class LLMClient:
     def __init__(self):
         self._client = AsyncOpenAI(
-            api_key=FPT_API_KEY,
-            base_url=FPT_BASE_URL,
+            api_key=ACTIVE_API_KEY,
+            base_url=ACTIVE_BASE_URL,
         )
         self._semaphore = asyncio.Semaphore(LLM_CONCURRENCY)
+        self._is_reasoning = IS_REASONING_MODEL
+        logger.info(
+            f"LLMClient: model={ACTIVE_MODEL}  base_url={ACTIVE_BASE_URL}  "
+            f"reasoning_model={self._is_reasoning}"
+        )
 
     @retry(
         stop=stop_after_attempt(4),
@@ -74,22 +81,21 @@ class LLMClient:
         messages: list[dict],
         temperature: float = LLM_TEMPERATURE,
         max_tokens: int = 2048,
-        response_format: str = "text",   # "text" | "json"
+        json_mode: bool = False,
     ) -> str:
         async with self._semaphore:
             kwargs: dict[str, Any] = {
-                "model": FPT_MODEL,
+                "model": ACTIVE_MODEL,
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
             }
-            if response_format == "json":
+            # Only non-reasoning models reliably support response_format
+            if json_mode and not self._is_reasoning:
                 kwargs["response_format"] = {"type": "json_object"}
 
             resp = await self._client.chat.completions.create(**kwargs)
             msg = resp.choices[0].message
-            # gpt-oss-120b: content holds the final answer, reasoning_content
-            # holds the chain-of-thought. Only use content.
             return msg.content or ""
 
     async def chat(
@@ -112,18 +118,24 @@ class LLMClient:
         temperature: float = 0.3,
         max_tokens: int = 2048,
     ) -> dict:
-        """Call LLM expecting a JSON response; returns parsed dict.
+        """
+        Call LLM expecting a JSON response; returns parsed dict.
 
-        Does NOT pass response_format=json because gpt-oss-120b (reasoning model)
-        may not support it and sometimes outputs thinking before the JSON object.
-        Instead we use robust JSON extraction.
+        For standard models (gpt-4o): uses response_format=json_object for
+        reliable output.
+        For reasoning models (gpt-oss-120b): relies on robust JSON extraction
+        since response_format may not be supported.
         """
         messages = [
             {"role": "system", "content": system},
             {"role": "user",   "content": user},
         ]
-        # Use text mode (no response_format) - extract JSON ourselves
-        raw = await self._call(messages, temperature=temperature, max_tokens=max_tokens)
+        raw = await self._call(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=True,
+        )
         try:
             return _extract_json(raw)
         except ValueError as exc:
