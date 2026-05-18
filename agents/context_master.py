@@ -53,7 +53,12 @@ def _build_user(block: LegalBlock, task: TaskDefinition, perspective: str) -> st
         1: "Tình huống nên đơn giản, trực tiếp đề cập đến các điều luật hoặc khái niệm trong văn bản.",
         2: "Tình huống nên có nhiều bên tham gia, mô tả rõ quan hệ pháp lý giữa các chủ thể.",
         3: "Tình huống nên phức tạp, đòi hỏi suy luận từ nhiều điều luật để đưa ra kết luận.",
-        4: "Tình huống nên chứa nhiều tình tiết và thông tin cần được diễn giải, tổng hợp.",
+        4: (
+            "Tình huống phải tạo ra ĐIỂM MƠ HỒ PHÁP LÝ rõ ràng: hành vi hoặc khoản chi "
+            "có thể được phân loại theo ≥2 cách khác nhau dẫn đến hệ quả pháp lý khác nhau. "
+            "Không đưa ra gợi ý hay kết luận trong tình huống – chỉ mô tả sự kiện thuần túy. "
+            "Tình huống phải có ít nhất 2 chủ thể với vai trò và nghĩa vụ khác nhau."
+        ),
         5: "Tình huống nên đặt ra vấn đề đạo đức, công bằng hoặc xung đột lợi ích.",
     }.get(task.level, "")
 
@@ -85,7 +90,7 @@ class ContextMaster:
                 system=_SYSTEM,
                 user=user_prompt,
                 temperature=0.75,
-                max_tokens=800,
+                max_tokens=1500,
             )
             return context.strip()
         except Exception as exc:

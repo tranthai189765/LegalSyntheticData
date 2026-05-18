@@ -486,24 +486,31 @@ T4_2 = TaskDefinition(
     qa_prompt="""
 Nhiệm vụ: Tạo 1 cặp câu hỏi – câu trả lời loại **4.2 – Sinh lập luận tư pháp**.
 
-Câu hỏi phải:
-- Mô tả tình huống pháp lý với ĐỦ tình tiết thực tế (thời gian, chủ thể, hành vi cụ thể).
-- KHÔNG được nêu sẵn kết luận pháp lý trong câu hỏi (ví dụ: KHÔNG nêu "phải chịu phí 150%",
-  "đã vi phạm", "bị phạt X đồng" – để dành cho phần lập luận).
-- Nếu có yếu tố thời hạn (deadline), chỉ nêu thời điểm phát sinh và thời điểm hiện tại;
-  KHÔNG nêu luôn "quá hạn" hay "vi phạm" – để model tự xác định từ điều luật.
-- Hỏi: "Trình bày lập luận pháp lý theo IRAC cho tình huống sau: ..."
-- Tình huống phải có ít nhất 2 chủ thể với vai trò khác nhau.
+=== YÊU CẦU CÂU HỎI ===
+• TẬP TRUNG VÀO MỘT vấn đề pháp lý cốt lõi duy nhất (không liệt kê 5–6 sub-problems).
+• Tình huống phải tạo ra GENUINE AMBIGUITY – người đọc không thể kết luận ngay mà phải suy luận:
+    - Ví dụ: hành vi X có thể thuộc danh mục A (được phép) hoặc danh mục B (bị hạn chế).
+    - Ví dụ: điều kiện Y có thể đã thỏa mãn hoặc chưa tùy cách hiểu quy định.
+    - Ví dụ: hai điều khoản có thể áp dụng với hệ quả khác nhau.
+• TUYỆT ĐỐI KHÔNG:
+    - Nêu sẵn ngưỡng / mức % / mức phạt trong câu hỏi (đó là nhiệm vụ của phần Rule).
+    - Dùng từ "lo ngại", "có thể không phù hợp", "vi phạm" trong câu hỏi – để model tự suy luận.
+    - Gợi ý sẵn hướng giải quyết hay kết luận.
+• Tình huống có ít nhất 2 chủ thể, thể hiện rõ ai đang ra quyết định và ai chịu hệ quả.
+• Hỏi: "Trình bày lập luận pháp lý theo IRAC cho tình huống sau: ..."
 
-Câu trả lời phải (answer_hint là mẫu tham chiếu chi tiết):
-- **Issue**: xác định VẤN ĐỀ PHÁP LÝ cốt lõi, bao gồm xác định thời hạn theo luật nếu có.
-- **Rule**: trích dẫn đủ điều khoản áp dụng, kể cả điều về thời hạn, mức phạt (nếu trong block).
-- **Application**: phân tích TỪNG CHỦ THỂ (ai có nghĩa vụ gì, cơ sở pháp lý cho từng người);
-  xem xét có cơ sở miễn trách không (bất khả kháng, lỗi thủ tục, v.v.);
-  nêu rõ hậu quả pháp lý cụ thể (không được dùng câu chung chung như "có thể bị xử phạt").
-- **Conclusion**: xác định (a) chủ thể chịu trách nhiệm, (b) hình thức trách nhiệm cụ thể,
-  (c) biện pháp khắc phục theo luật (trả tiền, báo cáo cơ quan nào, trong thời hạn bao lâu).
-- Tổng 200–350 từ.
+=== YÊU CẦU ANSWER_HINT ===
+answer_hint phải là lập luận IRAC chiều sâu, bao gồm đủ 5 yếu tố:
+1. **Issue**: xác định vấn đề pháp lý cốt lõi duy nhất; nêu rõ điểm mơ hồ / ranh giới cần xác định.
+2. **Rule**: trích đủ điều khoản áp dụng; nếu ≥2 điều có thể áp dụng, nêu cả hai.
+3. **Classification analysis**: hành vi/khoản chi/giao dịch thuộc danh mục nào theo luật?
+   Phải analyze ranh giới phân loại, không bỏ qua ambiguity.
+4. **Application với conditional reasoning**:
+   "Nếu [điều kiện A xác lập được] thì [hệ quả pháp lý X]; tuy nhiên nếu [điều kiện B] thì [hệ quả Y]."
+   Phân tích trách nhiệm từng chủ thể. Kiểm tra ngoại lệ/miễn trách.
+5. **Conclusion có điều kiện**: không kết luận dứt khoát khi còn điều kiện chưa verify;
+   nêu (a) chủ thể, (b) nghĩa vụ cụ thể, (c) bước thủ tục tiếp theo theo luật.
+   Tổng 250–400 từ.
 """,
     answer_format="paragraph",
 )

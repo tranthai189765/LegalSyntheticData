@@ -115,6 +115,10 @@ Với mỗi trích dẫn tìm được:
 3c. **classification** (0.0–1.0): QA có khớp đúng loại nhiệm vụ {task.id} không?
   - 1.0 = khớp hoàn toàn, câu hỏi đúng dạng, câu trả lời đúng format
   - 0.0 = sai loại nhiệm vụ hoàn toàn
+  - Với nhiệm vụ Level {task.level} (≥4): trừ 0.3 nếu câu trả lời chỉ là
+    "trích dẫn luật → restate facts → kết luận dứt khoát" mà không có:
+    (a) phân tích ranh giới phân loại hoặc (b) lập luận có điều kiện ("Nếu X thì Y")
+    hoặc (c) xem xét ngoại lệ. Đây là dấu hiệu reasoning chưa đủ chiều sâu cho level 4+.
 
 3d. **clarity** (0.0–1.0): Ngôn ngữ tiếng Việt pháp lý có tự nhiên, rõ ràng, chính xác không?
 
