@@ -487,14 +487,23 @@ T4_2 = TaskDefinition(
 Nhiệm vụ: Tạo 1 cặp câu hỏi – câu trả lời loại **4.2 – Sinh lập luận tư pháp**.
 
 Câu hỏi phải:
-- Mô tả tình huống pháp lý có tình tiết rõ ràng (1–2 đoạn văn).
+- Mô tả tình huống pháp lý với ĐỦ tình tiết thực tế (thời gian, chủ thể, hành vi cụ thể).
+- KHÔNG được nêu sẵn kết luận pháp lý trong câu hỏi (ví dụ: KHÔNG nêu "phải chịu phí 150%",
+  "đã vi phạm", "bị phạt X đồng" – để dành cho phần lập luận).
+- Nếu có yếu tố thời hạn (deadline), chỉ nêu thời điểm phát sinh và thời điểm hiện tại;
+  KHÔNG nêu luôn "quá hạn" hay "vi phạm" – để model tự xác định từ điều luật.
 - Hỏi: "Trình bày lập luận pháp lý theo IRAC cho tình huống sau: ..."
-- Tình huống phải liên quan trực tiếp đến các điều luật cung cấp.
+- Tình huống phải có ít nhất 2 chủ thể với vai trò khác nhau.
 
-Câu trả lời phải:
-- Trình bày đủ 4 phần IRAC, mỗi phần ít nhất 2–3 câu.
-- Dẫn chiếu điều luật cụ thể trong phần Rule.
-- Tổng 150–300 từ.
+Câu trả lời phải (answer_hint là mẫu tham chiếu chi tiết):
+- **Issue**: xác định VẤN ĐỀ PHÁP LÝ cốt lõi, bao gồm xác định thời hạn theo luật nếu có.
+- **Rule**: trích dẫn đủ điều khoản áp dụng, kể cả điều về thời hạn, mức phạt (nếu trong block).
+- **Application**: phân tích TỪNG CHỦ THỂ (ai có nghĩa vụ gì, cơ sở pháp lý cho từng người);
+  xem xét có cơ sở miễn trách không (bất khả kháng, lỗi thủ tục, v.v.);
+  nêu rõ hậu quả pháp lý cụ thể (không được dùng câu chung chung như "có thể bị xử phạt").
+- **Conclusion**: xác định (a) chủ thể chịu trách nhiệm, (b) hình thức trách nhiệm cụ thể,
+  (c) biện pháp khắc phục theo luật (trả tiền, báo cáo cơ quan nào, trong thời hạn bao lâu).
+- Tổng 200–350 từ.
 """,
     answer_format="paragraph",
 )

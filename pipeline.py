@@ -78,6 +78,42 @@ def _normalise(s: str) -> str:
     return s.upper().replace(" ", "").replace("–", "-").replace("‑", "-")
 
 
+def _filter_relevant_laws(answer: str, question: str, law_refs: List[str]) -> List[str]:
+    """
+    From the full block.law_references list, keep only those actually cited
+    in the final answer (or question).  Falls back to the full list if nothing
+    matches, so relevant_laws is never empty.
+
+    Strategy per ref "97/2021/TT-BTC - Điều 1":
+      1. doc_num ("97/2021/TT-BTC") must appear in answer+question
+      2. article label ("Điều 1") must appear in answer+question
+    Refs without an article part (bare doc number) are included if the doc
+    number appears anywhere.
+    """
+    combined = answer + " " + question
+    matched = []
+    for ref in law_refs:
+        if " - " not in ref:
+            if ref in combined:
+                matched.append(ref)
+            continue
+        doc_num, article_part = ref.split(" - ", 1)
+        if doc_num not in combined:
+            continue
+        # article_part e.g. "Điều 1", "Khoản 2", "Điểm a"
+        art_num_m = re.search(r'\d+', article_part)
+        if not art_num_m:
+            matched.append(ref)
+            continue
+        art_num = art_num_m.group()
+        # Accept if the article label appears verbatim (e.g. "Điều 1")
+        label_pattern = re.escape(article_part)
+        if re.search(label_pattern, combined, re.IGNORECASE):
+            matched.append(ref)
+
+    return matched if matched else law_refs
+
+
 def _check_law_citations(text: str, block: LegalBlock) -> str | None:
     """
     Fast regex pre-check: reject Q+hint if they cite document numbers absent from
@@ -258,10 +294,13 @@ class Pipeline:
 
                 if result.passed:
                     qid = self._next_qid(block.is_btc_focused)
+                    cited_laws = _filter_relevant_laws(
+                        result.best_answer, qa.question, block.law_references
+                    )
                     return SyntheticSample(
                         qid=qid,
                         question=qa.question,
-                        relevant_laws=block.law_references,
+                        relevant_laws=cited_laws,
                         answer=result.best_answer,
                         level=task.id,
                         instruction=qa.instruction,
