@@ -2,16 +2,22 @@
 Agent 4 – Checker (LLM-as-a-Judge)
 
 Evaluates a generated QA sample on four criteria:
-  1. Consensus  – Do Solver A and B substantially agree on the answer?
-  2. Factuality – Is the answer grounded in the provided legal text (no hallucinated laws)?
-  3. Classification – Does the QA pair match the stated task type / Bloom level?
-  4. Clarity    – Is the question and answer clear, natural Vietnamese legal writing?
+  1. Consensus      – Do Solver A and B substantially agree?
+  2. Factuality     – Are all citations in Q+A grounded in the provided block?
+                      Uses a 3-step structured verification:
+                        Step 1 – enumerate every citation in Q + A
+                        Step 2 – verify each citation against the block
+                        Step 3 – compute score; Python hard-overrides to 0.0
+                                  if any hallucinated citation is confirmed
+  3. Classification – Does the QA pair match the stated task type?
+  4. Clarity        – Is the language clear, natural Vietnamese legal writing?
 
 Returns a CheckResult with:
-  • passed    – bool (all four criteria must pass)
-  • score     – float [0, 1] overall confidence
-  • best_answer – the better answer (A or B) if passed; empty string otherwise
-  • feedback  – detailed feedback string for QACrafter on retry
+  • passed       – bool
+  • score        – float [0, 1] weighted aggregate
+  • best_answer  – the better solver answer
+  • feedback     – detailed guidance for QACrafter on retry
+  • details      – per-criterion scores + hallucinated citations list
 """
 
 from __future__ import annotations
@@ -28,21 +34,19 @@ from config import CHECKER_PASS_THRESHOLD
 @dataclass
 class CheckResult:
     passed: bool
-    score: float               # 0–1 aggregate confidence
-    best_answer: str           # the selected final answer
-    feedback: str              # guidance for QACrafter on retry
-    details: dict              # per-criterion scores
+    score: float
+    best_answer: str
+    feedback: str
+    details: dict
 
 
 _SYSTEM = """\
 Bạn là chuyên gia kiểm duyệt chất lượng dữ liệu huấn luyện mô hình ngôn ngữ pháp lý.
-Nhiệm vụ: đánh giá một cặp câu hỏi – câu trả lời theo 4 tiêu chí.
+Nhiệm vụ: đánh giá một cặp câu hỏi – câu trả lời theo quy trình 3 bước.
 
 QUY TẮC ĐẦU RA BẮT BUỘC:
-- Phần <output> PHẢI là một JSON object hợp lệ và HOÀN CHỈNH.
-- KHÔNG đặt text hoặc suy nghĩ vào phần content output.
 - CHỈ trả về JSON object, bắt đầu bằng { và kết thúc bằng }.
-- Không dùng markdown, không dùng ```json.
+- Không dùng markdown, không dùng ```json, không thêm text ngoài JSON.
 """
 
 
@@ -56,12 +60,12 @@ def _build_user(
 ) -> str:
     allowed_refs = "\n".join(f"  - {r}" for r in block.law_references) or "  (không có)"
     return f"""\
-=== THÔNG TIN ĐÁNH GIÁ ===
+=== NGỮ LIỆU ĐẦU VÀO ===
 
 Loại nhiệm vụ: {task.id} – {task.name_vi} (Level {task.level}: {task.level_name})
 Định dạng câu trả lời kỳ vọng: {task.answer_format}
 
---- Điều luật nguồn (toàn bộ nội dung được phép trích dẫn) ---
+--- Điều luật nguồn (TOÀN BỘ nội dung hợp lệ để trích dẫn) ---
 {block.combined_text}
 
 --- Danh sách tham chiếu hợp lệ ---
@@ -70,51 +74,69 @@ Loại nhiệm vụ: {task.id} – {task.name_vi} (Level {task.level}: {task.lev
 --- Câu hỏi ---
 {question}
 
---- Câu trả lời của Solver A ---
+--- Câu trả lời Solver A ---
 {answer_a}
 
---- Câu trả lời của Solver B ---
+--- Câu trả lời Solver B ---
 {answer_b}
 
 --- Câu trả lời tham khảo (QACrafter) ---
 {answer_hint}
 
-=== YÊU CẦU ĐÁNH GIÁ ===
+=== QUY TRÌNH ĐÁNH GIÁ 3 BƯỚC ===
 
-Đánh giá theo 4 tiêu chí sau (mỗi tiêu chí cho điểm từ 0.0 đến 1.0):
+**BƯỚC 1 – LIỆT KÊ TRÍCH DẪN**
+Tìm TẤT CẢ các trích dẫn pháp lý xuất hiện trong CÂU HỎI VÀ CẢ HAI câu trả lời Solver.
+Một trích dẫn là: số hiệu văn bản (ví dụ "03/1998/TT-BTC") và/hoặc số điều/khoản (ví dụ "Điều 5", "Khoản 2 Điều 3").
+Bao gồm cả cụm như "Nghị định số X/CP", "Thông tư số Y/TT-BTC", "Quyết định Z/QĐ-BTC".
 
-1. **consensus** (0–1): Mức độ đồng thuận giữa Solver A và B.
-   - 1.0 = hoàn toàn đồng thuận về nội dung cốt lõi
-   - 0.5 = đồng thuận một phần
-   - 0.0 = mâu thuẫn hoàn toàn
+**BƯỚC 2 – ĐỐI CHIẾU VỚI BLOCK**
+Với mỗi trích dẫn tìm được:
+(a) Số hiệu văn bản có xuất hiện trong "Điều luật nguồn" không?
+(b) Số điều/khoản đó có tồn tại trong "Điều luật nguồn" không?
+(c) Nội dung được diễn giải có khớp với những gì "Điều luật nguồn" nêu không?
+→ Nếu (a) hoặc (b) sai → trích dẫn bịa (hallucination).
+→ Nếu (c) sai → trích dẫn sai nội dung.
 
-2. **factuality** (0–1): Câu hỏi VÀ câu trả lời có bám sát "Điều luật nguồn" không?
-   - Kiểm tra CẢ HAI: câu hỏi + câu trả lời.
-   - Trừ 0.6 nếu câu hỏi hoặc câu trả lời đề cập số hiệu văn bản/điều khoản KHÔNG có trong "Danh sách tham chiếu hợp lệ".
-   - Trừ 0.3 nếu trích dẫn sai nội dung (nội dung đó có nhưng bị diễn giải sai).
-   - Trừ 0.1 nếu bỏ sót điều luật quan trọng.
-   - Điểm tối đa 1.0 khi mọi trích dẫn đều đúng và có trong nguồn.
+**BƯỚC 3 – ĐÁNH GIÁ 4 TIÊU CHÍ**
 
-3. **classification** (0–1): Câu hỏi và câu trả lời có đúng với loại nhiệm vụ {task.id} không?
-   - 1.0 = hoàn toàn khớp với mô tả loại nhiệm vụ
-   - 0.0 = sai loại hoàn toàn
+3a. **consensus** (0.0–1.0): Solver A và B có đồng thuận về nội dung cốt lõi không?
+  - 1.0 = đồng thuận hoàn toàn
+  - 0.5 = đồng thuận một phần
+  - 0.0 = mâu thuẫn
 
-4. **clarity** (0–1): Ngôn ngữ có rõ ràng, tự nhiên, phù hợp văn phong pháp lý tiếng Việt không?
+3b. **factuality** (0.0–1.0): Dựa trên kết quả Bước 2:
+  - Bắt đầu từ 1.0
+  - Trừ 0.5 cho mỗi trích dẫn bịa (văn bản hoặc điều khoản không tồn tại trong block)
+  - Trừ 0.2 cho mỗi trích dẫn sai nội dung (văn bản tồn tại nhưng bị diễn giải sai)
+  - Trừ 0.1 nếu bỏ sót điều luật quan trọng có trong block
+  - Tối thiểu 0.0
 
-Ngoài ra:
-- **best_solver**: "A" hoặc "B" (solver nào trả lời tốt hơn, hoặc "A" nếu ngang nhau)
-- **feedback**: Nếu có tiêu chí dưới 0.7, viết phản hồi cụ thể cho QACrafter để sửa
-  (nêu rõ vấn đề và cách cải thiện; nếu factuality thấp, liệt kê tên văn bản bị bịa).
-  Nếu tất cả ≥ 0.7, để trống "".
+3c. **classification** (0.0–1.0): QA có khớp đúng loại nhiệm vụ {task.id} không?
+  - 1.0 = khớp hoàn toàn, câu hỏi đúng dạng, câu trả lời đúng format
+  - 0.0 = sai loại nhiệm vụ hoàn toàn
 
-Trả về JSON (KHÔNG markdown):
+3d. **clarity** (0.0–1.0): Ngôn ngữ tiếng Việt pháp lý có tự nhiên, rõ ràng, chính xác không?
+
+3e. **best_solver**: "A" hoặc "B" (câu trả lời nào tốt hơn).
+
+3f. **hallucinated_citations**: Danh sách các trích dẫn bịa đặt tìm được ở Bước 2
+    (chuỗi mô tả ngắn mỗi mục, ví dụ "Điều 401 TT 18/2025/TT-BTC không tồn tại trong block").
+    Để [] nếu không có hallucination.
+
+3g. **feedback**: Nếu có tiêu chí nào dưới 0.7, mô tả cụ thể vấn đề và cách sửa cho QACrafter.
+    Nếu factuality thấp do hallucination: liệt kê tên văn bản/điều khoản bị bịa.
+    Để "" nếu tất cả tiêu chí ≥ 0.7.
+
+Trả về JSON (KHÔNG markdown, KHÔNG text trước/sau):
 {{
-  "consensus": <float>,
-  "factuality": <float>,
-  "classification": <float>,
-  "clarity": <float>,
+  "hallucinated_citations": ["<mô tả vi phạm 1>", ...],
+  "consensus": <float 0.0-1.0>,
+  "factuality": <float 0.0-1.0>,
+  "classification": <float 0.0-1.0>,
+  "clarity": <float 0.0-1.0>,
   "best_solver": "<A hoặc B>",
-  "feedback": "<chuỗi phản hồi hoặc rỗng>"
+  "feedback": "<chuỗi hoặc rỗng>"
 }}
 """
 
@@ -148,6 +170,7 @@ class Checker:
                 details={},
             )
 
+        hallucinated_citations: list = result.get("hallucinated_citations", [])
         consensus      = float(result.get("consensus",      0.0))
         factuality     = float(result.get("factuality",     0.0))
         classification = float(result.get("classification", 0.0))
@@ -155,7 +178,15 @@ class Checker:
         best_solver    = result.get("best_solver", "A")
         feedback       = result.get("feedback", "")
 
-        # Aggregate score (factuality weighted more heavily)
+        # Hard override: if checker confirmed hallucinated citations, factuality = 0
+        if hallucinated_citations:
+            factuality = 0.0
+            hal_str = "; ".join(hallucinated_citations)
+            hallucination_note = f"HALLUCINATION CONFIRMED: {hal_str}"
+            feedback = (hallucination_note + " | " + feedback).rstrip(" |")
+            logger.debug(f"  Checker confirmed hallucination: {hal_str[:120]}")
+
+        # Aggregate score (factuality weighted 40%)
         score = (
             consensus      * 0.20 +
             factuality     * 0.40 +
@@ -163,7 +194,7 @@ class Checker:
             clarity        * 0.15
         )
 
-        # Must pass threshold AND factuality floor (anti-hallucination)
+        # Pass requires score threshold + factuality floor + classification floor
         passed = (
             score >= CHECKER_PASS_THRESHOLD
             and factuality >= 0.6
@@ -173,12 +204,11 @@ class Checker:
         best_answer = answer_a if best_solver == "A" else answer_b
 
         if not passed and not feedback:
-            # Auto-generate generic feedback
             issues = []
             if consensus < 0.7:
-                issues.append("Hai câu trả lời mâu thuẫn nhau – câu hỏi có thể quá mơ hồ.")
+                issues.append("Hai câu trả lời mâu thuẫn – câu hỏi có thể quá mơ hồ.")
             if factuality < 0.7:
-                issues.append("Câu trả lời chứa thông tin không có trong điều luật – hãy đặt câu hỏi bám sát hơn vào văn bản.")
+                issues.append("Câu trả lời chứa thông tin không có trong điều luật – hãy bám sát văn bản hơn.")
             if classification < 0.7:
                 issues.append(f"Câu hỏi/câu trả lời không khớp với loại nhiệm vụ {task.id} ({task.name_vi}).")
             if clarity < 0.7:
@@ -195,5 +225,6 @@ class Checker:
                 "factuality": factuality,
                 "classification": classification,
                 "clarity": clarity,
+                "hallucinated_citations": hallucinated_citations,
             },
         )

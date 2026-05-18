@@ -62,27 +62,42 @@ from tasks.definitions import TaskDefinition, sample_task
 
 # ── Law-citation pre-validator ────────────────────────────────────────────────
 
-# Matches patterns like "20/1998/NĐ-CP", "07/1999/TT-BTC", "03/1997/TTLT/NHNN-BTC"
+# Pattern 1: standard Vietnamese law numbers  e.g. "20/1998/NĐ-CP", "07/1999/TT-BTC"
 _LAW_NUMBER_RE = re.compile(
     r'\b\d{1,4}/\d{4}/[A-ZÀ-Ỹa-zà-ỹ\-/]+',
     re.UNICODE,
 )
+# Pattern 2: old-style numbers without year  e.g. "162 TC/KBNN", "03/CP", "51/CP"
+_LAW_SHORT_RE = re.compile(
+    r'\b\d{1,4}/(?:CP|BTC|TC|KBNN|QĐ|NĐ)[A-Z\-]*\b',
+    re.UNICODE,
+)
+
+
+def _normalise(s: str) -> str:
+    return s.upper().replace(" ", "").replace("–", "-").replace("‑", "-")
 
 
 def _check_law_citations(text: str, block: LegalBlock) -> str | None:
     """
-    Return a feedback string if `text` references law numbers not in the block,
-    else return None (no issue found).
+    Fast regex pre-check: reject Q+hint if they cite document numbers absent from
+    the block.  This fires *before* the LLM Solver calls, saving two API round-trips
+    on obvious hallucination.  The Checker still does a deeper semantic verify.
     """
-    allowed = {u.official_number.upper() for u in block.units if u.official_number}
-    cited = set(_LAW_NUMBER_RE.findall(text))
-    hallucinated = {c for c in cited if c.upper() not in allowed}
+    allowed_raw = {u.official_number for u in block.units if u.official_number}
+    allowed = {_normalise(n) for n in allowed_raw}
+
+    cited: set[str] = set()
+    for pat in (_LAW_NUMBER_RE, _LAW_SHORT_RE):
+        cited |= set(pat.findall(text))
+
+    hallucinated = {c for c in cited if _normalise(c) not in allowed}
     if hallucinated:
         listed = ", ".join(sorted(hallucinated))
-        allowed_list = ", ".join(sorted(allowed))
+        allowed_list = ", ".join(sorted(allowed_raw))
         return (
             f"Câu hỏi/câu trả lời đề cập văn bản không có trong block: [{listed}]. "
-            f"Chỉ được dùng: [{allowed_list}]. Hãy tạo lại câu hỏi chỉ dựa vào các văn bản hợp lệ."
+            f"Chỉ được dùng: [{allowed_list}]. Hãy tạo lại chỉ dựa vào các văn bản hợp lệ."
         )
 
 
