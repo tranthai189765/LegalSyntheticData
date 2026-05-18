@@ -37,6 +37,7 @@ Nguyên tắc bắt buộc:
 2. KHÔNG được bịa đặt số điều/số nghị định/mức phạt không có trong văn bản.
 3. Câu hỏi phải rõ ràng, tự nhiên, phù hợp văn phong pháp lý tiếng Việt.
 4. Câu trả lời phải chính xác, có thể kiểm chứng từ văn bản pháp luật.
+5. CHỐNG HALLUCINATION: Chỉ được nhắc đến số hiệu văn bản pháp luật có trong "Danh sách văn bản được phép trích dẫn" bên dưới.
 
 QUY TẮC ĐẦU RA BẮT BUỘC:
 - Phần output PHẢI là một JSON object hợp lệ và HOÀN CHỈNH.
@@ -60,11 +61,22 @@ def _build_user(
 
 """
 
+    # Build explicit allowed-law list to prevent hallucination
+    allowed_laws = "\n".join(f"  - {ref}" for ref in block.law_references) or "  (không có)"
+    doc_numbers = ", ".join(
+        sorted({u.official_number for u in block.units if u.official_number})
+    )
+
     return f"""\
 {feedback_section}\
 Các điều luật được cung cấp:
 
 {block.combined_text}
+
+---
+Danh sách văn bản được phép trích dẫn (KHÔNG được nhắc đến bất kỳ văn bản nào khác):
+{allowed_laws}
+Số hiệu văn bản: {doc_numbers}
 
 ---
 Tình huống pháp lý:
@@ -78,6 +90,7 @@ Hướng dẫn chi tiết về loại nhiệm vụ này:
 
 ---
 Hãy tạo 1 cặp câu hỏi – câu trả lời theo đúng loại nhiệm vụ trên.
+NHẮC LẠI: Chỉ được trích dẫn số hiệu văn bản từ danh sách trên.
 Trả về JSON hợp lệ (không có markdown) theo định dạng:
 {{
   "question": "<câu hỏi hoàn chỉnh>",

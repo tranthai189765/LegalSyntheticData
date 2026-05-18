@@ -54,14 +54,18 @@ def _build_user(
     block: LegalBlock,
     task: TaskDefinition,
 ) -> str:
+    allowed_refs = "\n".join(f"  - {r}" for r in block.law_references) or "  (không có)"
     return f"""\
 === THÔNG TIN ĐÁNH GIÁ ===
 
 Loại nhiệm vụ: {task.id} – {task.name_vi} (Level {task.level}: {task.level_name})
 Định dạng câu trả lời kỳ vọng: {task.answer_format}
 
---- Điều luật nguồn ---
+--- Điều luật nguồn (toàn bộ nội dung được phép trích dẫn) ---
 {block.combined_text}
+
+--- Danh sách tham chiếu hợp lệ ---
+{allowed_refs}
 
 --- Câu hỏi ---
 {question}
@@ -84,9 +88,12 @@ Loại nhiệm vụ: {task.id} – {task.name_vi} (Level {task.level}: {task.lev
    - 0.5 = đồng thuận một phần
    - 0.0 = mâu thuẫn hoàn toàn
 
-2. **factuality** (0–1): Câu trả lời có dựa CHÍNH XÁC vào điều luật cung cấp không?
-   - Phạt nặng (-0.5) nếu trích dẫn điều luật sai/bịa
-   - Phạt nhẹ (-0.2) nếu bỏ sót điều luật quan trọng
+2. **factuality** (0–1): Câu hỏi VÀ câu trả lời có bám sát "Điều luật nguồn" không?
+   - Kiểm tra CẢ HAI: câu hỏi + câu trả lời.
+   - Trừ 0.6 nếu câu hỏi hoặc câu trả lời đề cập số hiệu văn bản/điều khoản KHÔNG có trong "Danh sách tham chiếu hợp lệ".
+   - Trừ 0.3 nếu trích dẫn sai nội dung (nội dung đó có nhưng bị diễn giải sai).
+   - Trừ 0.1 nếu bỏ sót điều luật quan trọng.
+   - Điểm tối đa 1.0 khi mọi trích dẫn đều đúng và có trong nguồn.
 
 3. **classification** (0–1): Câu hỏi và câu trả lời có đúng với loại nhiệm vụ {task.id} không?
    - 1.0 = hoàn toàn khớp với mô tả loại nhiệm vụ
@@ -97,7 +104,8 @@ Loại nhiệm vụ: {task.id} – {task.name_vi} (Level {task.level}: {task.lev
 Ngoài ra:
 - **best_solver**: "A" hoặc "B" (solver nào trả lời tốt hơn, hoặc "A" nếu ngang nhau)
 - **feedback**: Nếu có tiêu chí dưới 0.7, viết phản hồi cụ thể cho QACrafter để sửa
-  (nêu rõ vấn đề và cách cải thiện). Nếu tất cả ≥ 0.7, để trống "".
+  (nêu rõ vấn đề và cách cải thiện; nếu factuality thấp, liệt kê tên văn bản bị bịa).
+  Nếu tất cả ≥ 0.7, để trống "".
 
 Trả về JSON (KHÔNG markdown):
 {{
