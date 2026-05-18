@@ -85,7 +85,7 @@ class ContextMaster:
                 system=_SYSTEM,
                 user=user_prompt,
                 temperature=0.75,
-                max_tokens=512,
+                max_tokens=800,
             )
             return context.strip()
         except Exception as exc:
